@@ -109,7 +109,16 @@ function hyphenCase(word) {
   const hyphenRE = /([a-z])([A-Z])/
   return word.replace(hyphenRE, (_, w, h) => w + '-' + h.toLowerCase())
 }
-
+function allEqual(...args) {
+  let init = args[0]
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] !== init) {
+      return false
+    }
+  }
+  
+  return true
+}
 function genId() {
   return `gen${++id}`
 }
@@ -164,7 +173,7 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
     }
 
     // a 标签的 `color` 不继承
-    if (k === 'color' && ['A'].includes(el.tagName)) {
+    if (k === 'color' && ['A', 'BUTTON'].includes(el.tagName)) {
       return false
     }
    
@@ -252,7 +261,7 @@ function isDefaultAttributeValue({ k, v, el }) {
     case 'justifyContent':
     case 'alignItems':
     case 'lineHeight':
-      return ['normal'].includes(v)
+      return ['normal', 'flex-start'].includes(v)
     
     case 'width': 
     case 'height': 
@@ -323,6 +332,9 @@ function calcNeedPatchedStyle(el) {
       }
     }
   })
+  
+  // patch前过滤
+  filterBeforePatch(needPatched)
   return needPatched
 }
 
@@ -414,6 +426,17 @@ function correctAttributeValue(camelAttrName, value) {
   return value
 }
 
+// patch前过滤
+function filterBeforePatch(style) {
+  // 合并 border
+  if (style['border-top'] && allEqual(style['border-top'], style['border-bottom'], style['border-left'], style['border-right'])) {
+    style.border = style['border-top']
+    delete style['border-top']
+    delete style['border-bottom']
+    delete style['border-left']
+    delete style['border-right']
+  }
+}
 // <!----------------------------- userInterface start----------------------------->
 // 是否匹配自定义规则
 function isSaveCurrentStyle({ k, v, el, styles }) {
