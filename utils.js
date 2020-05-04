@@ -52,6 +52,7 @@ var whiteList = [
   'list-style',
   'fill', // valid when tagName is SVG
   'flex-flow', // 
+  'box-sizing',
 ]
 var camelWhiteList = whiteList.map(item => camelCase(item))
 var blockTag =[
@@ -122,17 +123,19 @@ function safeSetObj(obj, index, k, v) {
   }
   obj[index][k] = v
 }
-// var defaultValue = {
-//   fontSize: {
-//     'default': 16,
-//     h1: 32,
+
 /**
  * 是否是继承而来的属性
  * 
  */
 function isHeritSourceAttributeValue({ k, v, el, styles }) {
   const isInlineNode = styles.display === 'inline' || styles.display === 'inline-block'
-  if (isInlineNode && canInheritStyleName.includes(k)) {
+  
+  if (
+    k === 'color' // 所有元素都可以继承 `color` 属性
+    || k === 'fontSize' // 所有元素都可以继承 `fontSize` 属性
+    || (isInlineNode && canInheritStyleName.includes(k))
+  ) {
     const parent = el.parentNode
     const parentStyle = getComputedStyle(parent)
     const parentMapValue = parentStyle[k]
@@ -144,14 +147,27 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
       // fontSize的值和tagName对应的值相等 则忽略该属性
       const tagNameMapFontSize = defaultValue.fontSize[el.tagName.toLowerCase()] || defaultValue.fontSize.default
       const similarized = fontSizeSimilarize ? Math.round(tagNameMapFontSize) : tagNameMapFontSize
+
       if (similarized === elMapFontSize) return true
 
       // fontSize的值和父级相等 则忽略该属性
       const parentMapFontSize = fontSizeSimilarize ? Math.round(extractFontSize(parentMapValue)) : extractFontSize(parentMapValue)
 
-      if (elMapFontSize === parentMapFontSize) return true
+      // 和父级相同且和自身属性值相同。
+      // 需要满足 和自身属性值 相同的原因：
+      // 举例：父级div 16px。子h1 16px。 看似满足前一部分，返回true，即不给h1添加额外样式。但最终的表现h1具有自带样式fontSize 36px
+      // 所以需要添加后一部分判断。即 和父级fontsize相同 且 和自身标签的fontSize相同
+      if (elMapFontSize === parentMapFontSize && similarized === elMapFontSize) {
+        return true
+      }
+      return false
     }
 
+    // a 标签的 `color` 不继承
+    if (k === 'color' && ['A'].includes(el.tagName)) {
+      return false
+    }
+   
     return parentMapValue === v
   }
 }
@@ -159,6 +175,14 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
  * 是否是无效的属性值
  */
 function isInValidAttributeValue({ k, v, el }) {
+  /* 属性的组合是否无效 */
+  // 块元素无需设置display block
+  if (k === 'display' && v === 'block' && blockTag.includes(el.tagName)) 
+    return true
+  // 行内元素无需设置display inline
+  if (k === 'display' && v === 'inline' && !blockTag.includes(el.tagName)) 
+    return true
+  
   /* 属性的值是否无效 */
   switch(k) {
     case 'borderTop':
@@ -186,15 +210,6 @@ function isInValidAttributeValue({ k, v, el }) {
     case 'padding':
       return !['UL', 'LI'].includes(el.tagName) && ['0px'].includes(v)
   }
-
-  /* 属性的组合是否无效 */
-  // 块元素无需设置display block
-  if (k === 'display' && v === 'block' && blockTag.includes(el.tagName)) 
-    return true
-  // 行内元素无需设置display inline
-  if (k === 'display' && v === 'inline' && !blockTag.includes(el.tagName)) 
-    return true
-  
 }
 /**
  * 是否是元素的默认值
@@ -263,9 +278,9 @@ function isDefaultAttributeValue({ k, v, el }) {
     
     case 'flexFlow':
       return ['row nowrap'].includes(v)
-      
-    default:
-      return false
+
+    case 'boxSizing':
+      return ['content-box'].includes(v)
   }
 }
 // 提取单位像素中的值，如16px -> 16
@@ -406,9 +421,9 @@ function isSaveCurrentStyle({ k, v, el, styles }) {
 }
 // 自定义拦截器
 function afterInterceptor(el, clone) {
-  if (location.href.includes('jenkins')) {
+  if (location.href.includes('pub.flutter-io.cn')) {
     // test website:   https://ci.jenkins.io/view/Projects/builds
-    const base = 'https://ci.jenkins.io'
+    const base = 'https://pub.flutter-io.cn'
     if (el.tagName === 'IMG') {
       clone.setAttribute('src', base + el.getAttribute('src'))
     }
