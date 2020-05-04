@@ -1,15 +1,11 @@
+var hasKnowWarnings = [
+  '所有属性都具有固定width/height，需自行删除',
+  'backgroundPosition直接设置导致设置背景属性无效。如background: rgba(255, 255, 255, 0.125) none no-repeat scroll right 8px 50% / auto padding-box border-box'
+]
 // 属性白名单
 var whiteList = [
   'margin',
-  // 'margin-left',
-  // 'margin-right',
-  // 'margin-top',
-  // 'margin-bottom',
   'padding',
-  // 'padding-left',
-  // 'padding-right',
-  // 'padding-top',
-  // 'padding-bottom',
   'background',
   'color',
   'position',
@@ -17,7 +13,6 @@ var whiteList = [
   'left',
   'right',
   'bottom',
-  // 'border',
   'border-top',
   'border-bottom',
   'border-left',
@@ -42,7 +37,9 @@ var whiteList = [
   'text-overflow',
   'overflow',
   'list-style',
+  'fill', // valid when tagName is SVG
 ]
+var camelWhiteList = whiteList.map(item => camelCase(item))
 var blockTag =[
   'DIV',
   'P',
@@ -65,27 +62,39 @@ var blockTag =[
 var removeMathes = [
   (k, v) => v === 'auto',
   (k, v) => v === 'normal',
-  (k, v) => k === 'transform' && v === 'none',
+  (k, v) => ['transform', 'float'].includes(k) && v === 'none',
   (k, v) => k === 'verticalAlign' && v === 'baseline',
   (k, v) => k === 'position' && v === 'static',
   (k, v) => k === 'overflow' && v === 'visible',
   (k, v) => k === 'margin' && v === '0px',
-  (k, v, { tagName }) => tagName !== 'INPUT' && k.startsWith('border') && v.startsWith('0px'),
-  (k, v, { tagName }) => k === 'padding' && v === '0px' && tagName !== 'UL',
-  (k, v, { tagName }) => blockTag.includes(tagName) && k === 'display' && v === 'block',
+  (k, v) => k === 'flexDirection' && v === 'row',
   (k, v) => k === 'lineHeight' && v === 'normal',
-  (k, v) => k === 'textAlign' && v === 'start',
-  (k, v) => k === 'textAlign' && v === 'left',
   (k, v) => k === 'transition' && v === 'all 0s ease 0s',
   (k, v) => k === 'textOverflow' && v === 'clip',
   (k, v, { tagName }) => tagName !== 'A' && k === 'textDecoration',
   (k, v, _, styles) => styles.position === 'relative' && ['top', 'left', 'right', 'bottom'].includes(k) && v === '0px',
   (k, v, { tagName }) => tagName === 'UL' && k === 'listStyleType' && v === 'disc',
+  (k, v, { tagName }) => tagName !== 'svg' && k === 'fill',
+  (k, v, { tagName }) => k === 'padding' && v === '0px' && tagName !== 'UL',
+  (k, v, { tagName }) => {
+    if (['top', 'left', 'right', 'bottom'].map(k => camelCase(`border-${k}`)).includes(k)) {
+      // 非button标签 -> 移除border属性
+      if (tagName !== 'BUTTON' && tagName !== 'INPUT') {
+        if (v && !v.startsWith('0px')) return false
+        return true
+      } else {
+        if (v === '0px none rgb(0, 0, 0)') return true
+      }
+    }
+  },
+  (k, v, { tagName }) => blockTag.includes(tagName) && k === 'display' && v === 'block',
+  (k, v, el) => isDefaultAttributeValue({ k, v, el }),
 ]
 // 唯一类名选择器id
 var id = 0
 // 最终生成的样式字符串
 var styleStr = ''
+var cacheElStyles = {}
 
 // <!----------------------------- utils start----------------------------->
 function camelCase(word) {
@@ -100,6 +109,27 @@ function hyphenCase(word) {
 function genId() {
   return `gen${++id}`
 }
+function isDefaultAttributeValue({ k, v, el }) {
+  const { tagName } = el
+  let rawValue, newEl
+
+  if (!cacheElStyles[tagName]) {
+    newEl = document.createElement(tagName)
+    newEl.visiable = false
+    document.body.appendChild(newEl)
+    // cache
+    cacheElStyles[tagName] = getComputedStyle(newEl)
+  }
+  rawValue = cacheElStyles[tagName][k]
+  newEl && newEl.remove()
+
+  return v === rawValue
+}
+function testUtil(classSelector) {
+  if (classSelector === 'body') return document.body
+  // d-block f6 text-white no-underline lh-condensed p-3
+  return document.querySelector('.' + classSelector.split(' ').join('.'))
+}
 // <!----------------------------- utils end----------------------------->
 
 function calcNeedPatchedStyle(el) {
@@ -108,7 +138,6 @@ function calcNeedPatchedStyle(el) {
 
   const needPatched = {}
 
-  const camelWhiteList = whiteList.map(item => camelCase(item))
   Object.keys(baseStyle).forEach(k => {
     if (camelWhiteList.includes(k)) {
       const styles = getComputedStyle(el)
@@ -119,7 +148,6 @@ function calcNeedPatchedStyle(el) {
       if (shouldSaveStyle) {
         // 过滤属性值
         const shouldRecord = attributeShouldRecord(k, current, el, styles)
-
         if (shouldRecord && getComputedStyle(tagMapEl)[k] !== current) {
           const camelAttrName = hyphenCase(k)
           let value = styles[k]
@@ -141,7 +169,7 @@ function generateStyle(style) {
     Object.entries(style).forEach(([k, v]) => {
       str += `${k}: ${v};`
     })
-    styleStr += `.${id}{${str}}`
+    styleStr += `#${id}{${str}}`
     return id
   }
 }
@@ -150,12 +178,14 @@ function addStyleAndUpdateClass(el, clone) {
   const patchedStyle = calcNeedPatchedStyle(el)
   const id = generateStyle(patchedStyle)
   if (id) {
-    clone.classList = [id]
+    // clone.classList = [id]
+    clone.id = id
   }
 }
 
 function cloneElementToHtml(el, clone, needReturn = true) {
   addStyleAndUpdateClass(el, clone)
+  afterInterceptor(el, clone)
   const deleteEls = []
   el.childNodes && Array.from(el.childNodes).forEach((childNode, idx) => {
     // 注释节点
@@ -173,7 +203,8 @@ function cloneElementToHtml(el, clone, needReturn = true) {
   deleteEls.forEach(el => el.remove())
 
   if (!needReturn) return
-  const classAttr = clone.classList && clone.classList.length ? `class="${Array.from(clone.classList || []).join(' ')}"` : ''
+  // const classAttr = clone.classList && clone.classList.length ? `class="${Array.from(clone.classList || []).join(' ')}"` : ''
+  const classAttr = clone.id ? `id="${clone.id}"` : ''
 
   return `
   <html>
@@ -198,18 +229,8 @@ function attributeShouldRecord(k, v, el, styles) {
       return false
     }
   }
+
   return true
-  // const { tagName } = el
-  // switch(tagName) {
-  //   case 'INPUT': {
-  //     if (k === 'border' && v === 'none') {
-  //       return false
-  //     }
-  //   }
-  //   default: {
-  //     return true
-  //   }
-  // }
 }
 
 // 校正属性值
@@ -222,15 +243,22 @@ function correctAttributeValue(camelAttrName, value) {
   return value
 }
 
+// <!----------------------------- userInterface start----------------------------->
 // 是否匹配自定义规则
-// true -> 保存该样式
-function isSaveCurrentStyle({ k, v, el, styles}) {
-  // if (el.parentNode.classList[0] === 'meta-list') {
-  //   return false
-  // }
-
+function isSaveCurrentStyle({ k, v, el, styles }) {
   return true
 }
+// 自定义拦截器
+function afterInterceptor(el, clone) {
+  if (location.href.includes('jenkins')) {
+    // test website:   https://ci.jenkins.io/view/Projects/builds
+    const base = 'https://ci.jenkins.io'
+    if (el.tagName === 'IMG') {
+      clone.setAttribute('src', base + el.getAttribute('src'))
+    }
+  }
+}
+// <!----------------------------- userInterface end----------------------------->
 
 // 启动应用
 function setup(el) {
@@ -238,9 +266,12 @@ function setup(el) {
 
   const html = cloneElementToHtml(el, clone)
   // console.clear()
+  console.log(hasKnowWarnings.length ? hasKnowWarnings : '');
   console.log(html)
 }
 
-setup(document.querySelector(
-  'body'
-))
+setup(
+  testUtil(
+    'body'
+  )
+)
