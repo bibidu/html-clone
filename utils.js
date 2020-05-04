@@ -51,6 +51,7 @@ var whiteList = [
   'overflow',
   'list-style',
   'fill', // valid when tagName is SVG
+  'flex-flow', // 
 ]
 var camelWhiteList = whiteList.map(item => camelCase(item))
 var blockTag =[
@@ -260,6 +261,9 @@ function isDefaultAttributeValue({ k, v, el }) {
     case 'flex':
       return ['0 1 auto'].includes(v)
     
+    case 'flexFlow':
+      return ['row nowrap'].includes(v)
+      
     default:
       return false
   }
@@ -424,6 +428,6 @@ function setup(el) {
 
 setup(
   testUtil(
-    'comment-list-box'
+    'body'
   )
 )
