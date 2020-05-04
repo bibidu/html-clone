@@ -165,8 +165,8 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
       // 和父级相同且和自身属性值相同。
       // 需要满足 和自身属性值 相同的原因：
       // 举例：父级div 16px。子h1 16px。 看似满足前一部分，返回true，即不给h1添加额外样式。但最终的表现h1具有自带样式fontSize 36px
-      // 所以需要添加后一部分判断。即 和父级fontsize相同 且 和自身标签的fontSize相同
-      if (elMapFontSize === parentMapFontSize && similarized === elMapFontSize) {
+      // 所以需要添加后一部分判断。即 需要元素本身不存在非正常的fontSize
+      if (elMapFontSize === parentMapFontSize && !['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BUTTON'].includes(el.tagName)) {
         return true
       }
       return false
