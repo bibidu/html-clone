@@ -75,7 +75,7 @@ var blockTag =[
 ]
 // 移除无效属性值
 var removeMathes = [
-  (k, v, el, styles) => isDefaultAttributeValue({ k, v, el }) || isInValidAttributeValue({ k, v, el }) || isHeritSourceAttributeValue({ k, v, el, styles }),
+  (k, v, el, styles) => isDefaultAttributeValue({ k, v, el }) || isInValidAttributeValue({ k, v, el, styles }) || isHeritSourceAttributeValue({ k, v, el, styles }),
 ]
 var canInheritStyleName = [
   'fontSize',
@@ -183,7 +183,7 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
 /**
  * 是否是无效的属性值
  */
-function isInValidAttributeValue({ k, v, el }) {
+function isInValidAttributeValue({ k, v, el, styles }) {
   /* 属性的组合是否无效 */
   // 块元素无需设置display block
   if (k === 'display' && v === 'block' && blockTag.includes(el.tagName)) 
@@ -218,6 +218,9 @@ function isInValidAttributeValue({ k, v, el }) {
     case 'margin':
     case 'padding':
       return !['UL', 'LI'].includes(el.tagName) && ['0px'].includes(v)
+    
+    case 'boxSizing':
+      return ['0px'].includes(styles.padding) && v === 'border-box'
   }
 }
 /**
