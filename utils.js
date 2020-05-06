@@ -53,6 +53,8 @@ var whiteList = [
   'fill', // valid when tagName is SVG
   'flex-flow', // 
   'box-sizing',
+  'box-shadow',
+  'clear',
 ]
 var camelWhiteList = whiteList.map(item => camelCase(item))
 var blockTag =[
@@ -73,9 +75,11 @@ var blockTag =[
   'FORM',
   'BLOCKQUOTE',
 ]
-// 移除无效属性值
-var removeMathes = [
-  (k, v, el, styles) => isDefaultAttributeValue({ k, v, el }) || isInValidAttributeValue({ k, v, el, styles }) || isHeritSourceAttributeValue({ k, v, el, styles }),
+// 过滤属性的条件
+var filterConditions = [
+  (k, v, el) => isDefaultAttribute({ k, v, el }),
+  (k, v, el, styles) => isInValidAttribute({ k, v, el, styles }),
+  (k, v, el, styles) => isInHeritSourceAttribute({ k, v, el, styles }),
 ]
 var canInheritStyleName = [
   'fontSize',
@@ -99,6 +103,7 @@ var styleStr = ''
 var cacheElStyles = {}
 // 是否对fontSize作近似处理
 var fontSizeSimilarize = true
+var deleteEls = []
 
 // <!----------------------------- utils start----------------------------->
 function camelCase(word) {
@@ -137,7 +142,7 @@ function safeSetObj(obj, index, k, v) {
  * 是否是继承而来的属性
  * 
  */
-function isHeritSourceAttributeValue({ k, v, el, styles }) {
+function isInHeritSourceAttribute({ k, v, el, styles }) {
   const isInlineNode = styles.display === 'inline' || styles.display === 'inline-block'
   
   if (
@@ -146,6 +151,8 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
     || (isInlineNode && canInheritStyleName.includes(k))
   ) {
     const parent = el.parentNode
+    if (!parent) return false
+
     const parentStyle = getComputedStyle(parent)
     const parentMapValue = parentStyle[k]
 
@@ -183,7 +190,7 @@ function isHeritSourceAttributeValue({ k, v, el, styles }) {
 /**
  * 是否是无效的属性值
  */
-function isInValidAttributeValue({ k, v, el, styles }) {
+function isInValidAttribute({ k, v, el, styles }) {
   /* 属性的组合是否无效 */
   // 块元素无需设置display block
   if (k === 'display' && v === 'block' && blockTag.includes(el.tagName)) 
@@ -198,7 +205,7 @@ function isInValidAttributeValue({ k, v, el, styles }) {
     case 'borderBottom':
     case 'borderLeft':
     case 'borderRight':
-      return !['INPUT', 'BUTTON'].includes(el.tagName) && v.startsWith('0px')
+      return !['INPUT', 'BUTTON', 'TEXTAREA'].includes(el.tagName) && v.startsWith('0px')
 
     case 'textDecoration':
       return !['A'].includes(el.tagName)
@@ -217,10 +224,21 @@ function isInValidAttributeValue({ k, v, el, styles }) {
   
     case 'margin':
     case 'padding':
-      return !['UL', 'LI'].includes(el.tagName) && ['0px'].includes(v)
+      return !['UL', 'LI', 'FIGURE', 'P'].includes(el.tagName) && ['0px'].includes(v)
     
     case 'boxSizing':
       return ['0px'].includes(styles.padding) && v === 'border-box'
+
+    case 'textAlign':
+      return ['start', 'left'].includes(v) && !['TH'].includes(el.tagName)
+
+    case 'top':
+    case 'bottom':
+    case 'left':
+    case 'right':
+      return v === 'auto' || (
+        v === '0px' && !['absolute', 'fixed'].includes(styles.position)
+      )
   }
 }
 /**
@@ -228,16 +246,10 @@ function isInValidAttributeValue({ k, v, el, styles }) {
  * 由于getComputedStyle返回的是计算后的样式，所以当不同的样式环境下，表现出的样式默认值不同，如position的默认值可以是0px或auto
  * 所以考虑对不同的样式名进行单独判断
  */
-function isDefaultAttributeValue({ k, v, el }) {
+function isDefaultAttribute({ k, v, el }) {
   switch(k) {
     case 'position':
       return ['0px', 'auto', 'static'].includes(v)
-
-    case 'top':
-    case 'bottom':
-    case 'left':
-    case 'right':
-      return ['0px', 'auto'].includes(v)
 
     case 'flexDirection':
       return ['row'].includes(v)
@@ -282,9 +294,6 @@ function isDefaultAttributeValue({ k, v, el }) {
     case 'textDecoration':
       return ['underline'].includes(v)
 
-    case 'textAlign':
-      return ['start', 'left'].includes(v)
-
     case 'flex':
       return ['0 1 auto'].includes(v)
     
@@ -293,6 +302,11 @@ function isDefaultAttributeValue({ k, v, el }) {
 
     case 'boxSizing':
       return ['content-box'].includes(v)
+
+    case 'boxShadow':
+    case 'clear':
+      return ['none'].includes(v)
+    
   }
 }
 // 提取单位像素中的值，如16px -> 16
@@ -316,21 +330,17 @@ function calcNeedPatchedStyle(el) {
     if (camelWhiteList.includes(k)) {
       const styles = getComputedStyle(el)
       const current = styles[k]
-      
       // 自定义规则
-      const shouldSaveStyle = isSaveCurrentStyle({ k, v: current, el, styles})
+      const shouldSaveStyle = attributeUserInterceptor({ k, v: current, el, styles})
       if (shouldSaveStyle) {
         // 过滤属性值
-        const shouldDeleteEl = elShouldDelete(k, current, el, styles)
-        if (!shouldDeleteEl) {
-          const shouldRecord = attributeShouldRecord(k, current, el, styles)
-          if (shouldRecord && getComputedStyle(tagMapEl)[k] !== current) {
-            const camelAttrName = hyphenCase(k)
-            let value = styles[k]
-            // 校正属性值
-            value = correctAttributeValue(camelAttrName, value)
-            needPatched[camelAttrName] = value
-          }
+        const shouldRecord = attributeInterceptor(k, current, el, styles)
+        if (shouldRecord && getComputedStyle(tagMapEl)[k] !== current) {
+          const camelAttrName = hyphenCase(k)
+          let value = styles[k]
+          // 校正属性值
+          value = correctAttributeValue(camelAttrName, value)
+          needPatched[camelAttrName] = value
         }
       }
     }
@@ -348,43 +358,61 @@ function generateStyle(style) {
     Object.entries(style).forEach(([k, v]) => {
       str += `${k}: ${v};`
     })
-    styleStr += `#${id}{${str}}`
+    // styleStr += `#${id}{${str}}`
+    styleStr += `.${id}{${str}}`
     return id
   }
 }
 
-function addStyleAndUpdateClass(el, clone) {
+function addStyleAndUpdateClass(el, clone, isRoot) {
   const patchedStyle = calcNeedPatchedStyle(el)
+  // 用于被子元素继承的属性
+  if (isRoot) {
+    const computed = getComputedStyle(el)
+    Object.keys(computed).forEach(k => {
+      if (camelWhiteList.includes(k)) {
+        patchedStyle[hyphenCase(k)] = computed[k]
+      }
+    })
+  }
   const id = generateStyle(patchedStyle)
   if (id) {
-    // clone.classList = [id]
-    clone.id = id
+    clone.classList.add(id)
   }
   clearAttrNames.forEach(name => clone.removeAttribute(name))
 }
 
-function cloneElementToHtml(el, clone, needReturn = true) {
-  addStyleAndUpdateClass(el, clone)
+function cloneElementToHtml(el, clone, isRoot = true) {
+  if (elShouldSkip(el)) {
+    deleteEls.push(clone)
+    return
+  }
+
+  addStyleAndUpdateClass(el, clone, isRoot) // 根节点的getComputedStyle均进行保存用于 `子元素继承`
   afterInterceptor(el, clone)
-  const deleteEls = []
   el.childNodes && Array.from(el.childNodes).forEach((childNode, idx) => {
+    const cloneNode = clone.childNodes[idx]
     // 注释节点
     if (childNode.nodeType === 8 || ['SCRIPT', 'LINK'].includes(childNode.tagName)) {
-      deleteEls.push(clone.childNodes[idx])
+      // deleteEls.push(childNode)
+      deleteEls.push(cloneNode)
     } else {
       if (
         childNode.nodeType !== 3 // 文本节点
       ) {
-        cloneElementToHtml(childNode, clone.childNodes[idx], false)
+        if (cloneNode && cloneNode.nodeType !== 3) {
+          cloneElementToHtml(childNode, cloneNode, false)
+        }
       }
     }
   })
 
-  deleteEls.forEach(el => el.remove())
+  // deleteEls.forEach(el => el.remove())
 
-  if (!needReturn) return
-  // const classAttr = clone.classList && clone.classList.length ? `class="${Array.from(clone.classList || []).join(' ')}"` : ''
-  const classAttr = clone.id ? `id="${clone.id}"` : ''
+  if (!isRoot) return
+  const classAttr = clone.classList && clone.classList.length ? `class="${Array.from(clone.classList || []).join(' ')}"` : ''
+  // const classAttr = clone.id ? `id="${clone.id}"` : ''
+  deleteEls.forEach(el => el.remove())
 
   return `
   <html>
@@ -401,17 +429,24 @@ function cloneElementToHtml(el, clone, needReturn = true) {
   </html>
   `
 }
-// 删除隐藏元素
-function elShouldDelete(k, v, el, styles) {
-  if (el.style && el.style.display === 'none' || styles.display === 'none') {
-    el.remove()
+// 是否需要跳过
+function elShouldSkip(el) {
+  if (
+    [3, 8].includes(el.nodeType)
+    || (el.style && el.style.display === 'none')
+    || ['STYLE', 'SCRIPT'].includes(el.tagName)
+    || getComputedStyle(el).display === 'none'
+    // || getComputedStyle(el).width === '0px'
+    // 高度为0px时，子元素仍然可能显示
+    // || getComputedStyle(el).height === '0px'
+  ) {
     return true
   }
 }
 // 过滤属性值
-function attributeShouldRecord(k, v, el, styles) {
-  for (let i = 0; i < removeMathes.length; i++) {
-    if (removeMathes[i](k, v, el, styles)) {
+function attributeInterceptor(k, v, el, styles) {
+  for (let i = 0; i < filterConditions.length; i++) {
+    if (filterConditions[i](k, v, el, styles)) {
       return false
     }
   }
@@ -442,14 +477,14 @@ function filterBeforePatch(style) {
 }
 // <!----------------------------- userInterface start----------------------------->
 // 是否匹配自定义规则
-function isSaveCurrentStyle({ k, v, el, styles }) {
+function attributeUserInterceptor({ k, v, el, styles }) {
   return true
 }
 // 自定义拦截器
 function afterInterceptor(el, clone) {
-  if (location.href.includes('pub.flutter-io.cn')) {
+  if (location.href.includes('https://tt.edu.au')) {
     // test website:   https://ci.jenkins.io/view/Projects/builds
-    const base = 'https://pub.flutter-io.cn'
+    const base = 'https://tt.edu.au'
     if (el.tagName === 'IMG') {
       clone.setAttribute('src', base + el.getAttribute('src'))
     }
